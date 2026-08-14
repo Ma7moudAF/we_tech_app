@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "982210544902",
+    "project_id": "we-tech-app",
+    "storage_bucket": "we-tech-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:982210544902:android:41d90e9a46d2b5e1f54a87",
+        "android_client_info": {
+          "package_name": "com.example.flutter_prog"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCcdFzUDCj8BSUDCvO_qVPmnoHbCInzpiI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:982210544902:android:189a12f7ab215134f54a87",
+        "android_client_info": {
+          "package_name": "com.wetech.we_tech_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCcdFzUDCj8BSUDCvO_qVPmnoHbCInzpiI"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
