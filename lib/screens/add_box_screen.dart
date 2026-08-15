@@ -1,7 +1,9 @@
 // شاشة إضافة بوكس جديد - بتلقط الموقع الجغرافي تلقائيًا من الـ GPS
+// الفني بيختار: الكابينة الأب -> بلوك بوكسات (شمال/يمين) -> مكان فاضي جواه (1-10)
 
 import 'package:flutter/material.dart';
 
+import '../models/block_model.dart';
 import '../models/box_model.dart';
 import '../models/cabinet_model.dart';
 import '../services/firestore_service.dart';
@@ -19,14 +21,12 @@ class AddBoxScreen extends StatefulWidget {
 class _AddBoxScreenState extends State<AddBoxScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _terminalsController =
-      TextEditingController(text: '${BoxModel.combCapacity}');
   final _notesController = TextEditingController();
   final _firestoreService = FirestoreService();
 
   String? _parentCabinetId;
-  CabinetModel? _parentCabinet;
-  int? _slotNumber;
+  String? _blockId;
+  int? _positionInBlock;
   double? _latitude;
   double? _longitude;
   bool _isLocating = true;
@@ -42,7 +42,6 @@ class _AddBoxScreenState extends State<AddBoxScreen> {
   @override
   void dispose() {
     _nameController.dispose();
-    _terminalsController.dispose();
     _notesController.dispose();
     super.dispose();
   }
@@ -85,19 +84,29 @@ class _AddBoxScreenState extends State<AddBoxScreen> {
       );
       return;
     }
+    if (_blockId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('اختار بلوك البوكسات')),
+      );
+      return;
+    }
+    if (_positionInBlock == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('اختار مكان البوكس جوه البلوك')),
+      );
+      return;
+    }
 
     setState(() => _isSaving = true);
     try {
       await _firestoreService.addBox(
         name: _nameController.text.trim(),
         parentCabinetId: _parentCabinetId!,
+        blockId: _blockId!,
+        positionInBlock: _positionInBlock!,
         areaId: widget.areaId,
         latitude: _latitude!,
         longitude: _longitude!,
-        terminalsCount:
-            int.tryParse(_terminalsController.text.trim()) ??
-                BoxModel.combCapacity,
-        slotNumber: _slotNumber,
         notes: _notesController.text.trim().isEmpty
             ? null
             : _notesController.text.trim(),
@@ -134,7 +143,7 @@ class _AddBoxScreenState extends State<AddBoxScreen> {
                   border: OutlineInputBorder(),
                 ),
                 validator: (v) =>
-                    (v == null || v.trim().isEmpty) ? 'اكتب اسم البوكس' : null,
+                (v == null || v.trim().isEmpty) ? 'اكتب اسم البوكس' : null,
               ),
               const SizedBox(height: 16),
               StreamBuilder<List<CabinetModel>>(
@@ -145,51 +154,30 @@ class _AddBoxScreenState extends State<AddBoxScreen> {
                       ? _parentCabinetId
                       : null;
                   return DropdownButtonFormField<String>(
-                    value: validValue,
+                    initialValue: validValue,
                     decoration: const InputDecoration(
                       labelText: 'الكابينة الأب',
                       border: OutlineInputBorder(),
                     ),
                     items: cabinets
                         .map((c) => DropdownMenuItem(
-                              value: c.id,
-                              child: Text('${c.name} (${c.type.labelAr})'),
-                            ))
+                      value: c.id,
+                      child: Text('${c.name} (${c.type.labelAr})'),
+                    ))
                         .toList(),
                     onChanged: (v) => setState(() {
                       _parentCabinetId = v;
-                      CabinetModel? found;
-                      for (final c in cabinets) {
-                        if (c.id == v) {
-                          found = c;
-                          break;
-                        }
-                      }
-                      _parentCabinet = found;
-                      _slotNumber = null;
+                      _blockId = null;
+                      _positionInBlock = null;
                     }),
                     validator: (v) => v == null ? 'اختار الكابينة الأب' : null,
                   );
                 },
               ),
               const SizedBox(height: 16),
-              if (_parentCabinet != null) _buildSlotPicker(),
+              if (_parentCabinetId != null) _buildBlockPicker(),
               const SizedBox(height: 16),
-              TextFormField(
-                controller: _terminalsController,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: 'عدد الترمنالات (مضاعف ${BoxModel.combCapacity})',
-                  border: const OutlineInputBorder(),
-                ),
-                validator: (v) {
-                  final n = int.tryParse((v ?? '').trim());
-                  if (n == null || !BoxModel.isValidTerminalsCount(n)) {
-                    return 'لازم يكون مضاعف ${BoxModel.combCapacity}';
-                  }
-                  return null;
-                },
-              ),
+              if (_blockId != null) _buildPositionPicker(),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _notesController,
@@ -207,13 +195,13 @@ class _AddBoxScreenState extends State<AddBoxScreen> {
                 ),
                 child: _isSaving
                     ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: Colors.white,
-                        ),
-                      )
+                  height: 20,
+                  width: 20,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
                     : const Text('حفظ البوكس'),
               ),
             ],
@@ -223,47 +211,80 @@ class _AddBoxScreenState extends State<AddBoxScreen> {
     );
   }
 
-  Widget _buildSlotPicker() {
-    final cabinet = _parentCabinet!;
-    if (cabinet.boxCapacity == 0) {
-      return const Padding(
-        padding: EdgeInsets.only(bottom: 4),
-        child: Text(
-          'الكابينة دي مفيهاش بلوكات بوكسات محددة، فالبوكس هيتضاف من غير مكان ثابت في الرسمة.',
-          style: TextStyle(color: Colors.orange),
-        ),
-      );
-    }
-    return StreamBuilder<List<BoxModel>>(
-      stream: _firestoreService.streamBoxesForCabinet(cabinet.id),
+  Widget _buildBlockPicker() {
+    return StreamBuilder<List<BlockModel>>(
+      stream: _firestoreService.streamBlocks(_parentCabinetId!),
       builder: (context, snapshot) {
-        final takenSlots = (snapshot.data ?? [])
-            .map((b) => b.slotNumber)
-            .whereType<int>()
-            .toSet();
-        final availableSlots = List.generate(cabinet.boxCapacity, (i) => i + 1)
-            .where((s) => !takenSlots.contains(s))
+        final boxBlocks =
+        (snapshot.data ?? []).where((b) => b.type == BlockType.box).toList();
+
+        if (boxBlocks.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: Colors.orange.shade50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Text(
+              'مفيش بلوكات بوكسات على الكابينة دي لسه - ضيف بلوك بوكسات الأول '
+                  'من شاشة "الكابينة من جوه"',
+              style: TextStyle(color: Colors.orange),
+            ),
+          );
+        }
+
+        final validValue = boxBlocks.any((b) => b.id == _blockId) ? _blockId : null;
+
+        return DropdownButtonFormField<String>(
+          initialValue: validValue,
+          decoration: const InputDecoration(
+            labelText: 'بلوك البوكسات',
+            border: OutlineInputBorder(),
+          ),
+          items: boxBlocks
+              .map((b) => DropdownMenuItem(
+            value: b.id,
+            child: Text('${b.side.labelAr} - بلوك ${b.blockNumber}'),
+          ))
+              .toList(),
+          onChanged: (v) => setState(() {
+            _blockId = v;
+            _positionInBlock = null;
+          }),
+        );
+      },
+    );
+  }
+
+  Widget _buildPositionPicker() {
+    return StreamBuilder<List<BoxModel>>(
+      stream: _firestoreService.streamBoxesInBlock(_parentCabinetId!, _blockId!),
+      builder: (context, snapshot) {
+        final takenPositions =
+        (snapshot.data ?? []).map((b) => b.positionInBlock).toSet();
+        final availablePositions = List.generate(BlockModel.capacity, (i) => i + 1)
+            .where((p) => !takenPositions.contains(p))
             .toList();
         final validValue =
-            availableSlots.contains(_slotNumber) ? _slotNumber : null;
+        availablePositions.contains(_positionInBlock) ? _positionInBlock : null;
 
-        if (availableSlots.isEmpty) {
+        if (availablePositions.isEmpty) {
           return const Text(
-            'كل السلوتات متاخدة على الكابينة دي بالفعل',
+            'كل الأماكن في البلوك ده متاخدة بالفعل',
             style: TextStyle(color: Colors.red),
           );
         }
 
         return DropdownButtonFormField<int>(
-          value: validValue,
+          initialValue: validValue,
           decoration: const InputDecoration(
-            labelText: 'مكان البوكس (سلوت)',
+            labelText: 'مكان البوكس جوه البلوك',
             border: OutlineInputBorder(),
           ),
-          items: availableSlots
-              .map((s) => DropdownMenuItem(value: s, child: Text('سلوت $s')))
+          items: availablePositions
+              .map((p) => DropdownMenuItem(value: p, child: Text('مكان $p')))
               .toList(),
-          onChanged: (v) => setState(() => _slotNumber = v),
+          onChanged: (v) => setState(() => _positionInBlock = v),
         );
       },
     );
@@ -281,11 +302,11 @@ class _AddBoxScreenState extends State<AddBoxScreen> {
               child: _isLocating
                   ? const Text('جاري تحديد الموقع...')
                   : _locationError != null
-                      ? Text(_locationError!,
-                          style: const TextStyle(color: Colors.red))
-                      : Text(
-                          'الموقع: ${_latitude!.toStringAsFixed(6)}, ${_longitude!.toStringAsFixed(6)}',
-                        ),
+                  ? Text(_locationError!,
+                  style: const TextStyle(color: Colors.red))
+                  : Text(
+                'الموقع: ${_latitude!.toStringAsFixed(6)}, ${_longitude!.toStringAsFixed(6)}',
+              ),
             ),
             IconButton(
               icon: const Icon(Icons.refresh),

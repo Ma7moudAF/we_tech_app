@@ -1,15 +1,12 @@
 // شاشة إضافة كابينة جديدة - بتلقط الموقع الجغرافي تلقائيًا من الـ GPS
-// وبتحدد شكل الكابينة من جوه (بلوكات البوكسات + عدد الرئيسيات)
-// أي نوع (فيبر أو نحاس) ممكن يبقى ليه بوكسات، رئيسيات، أو الاتنين مع بعض
+//
+// شكل الكابينة من جوه (بلوكات بوكسات/رئيسيات + شيلفات بورتات) بقى مبيتحددش
+// هنا خالص - بيتضاف بعدين بحرية من شاشة "الكابينة من جوه" (الرسمة)،
+// وكل كابينة تصميمها ممكن يبقى مختلف تمامًا عن التانية.
 //
 // لو النوع "نحاس": الشاشة بتسأل على طول عن الكابينة الفيبر الأم اللي كابينة
-// النحاس دي هتاخد منها (زي ما اتفقنا: كابينة النحاس مسموح ليها بأب واحد بس
-// طول عمرها، ومفيهاش "كود بورت" محدد وقت الإنشاء - الربط ده بيبقى بعدين لما
-// يتحدد رئيسي معين واخد من بورت معين، شوف assignMainPairSource).
-//
-// وبلوكات البوكسات: بدل ما تتضاف يدوي واحد واحد، لما تحفظ الكابينة، البوكسات
-// الفاضية بتتولد تلقائيًا بنفس اللحظة (بلوك 1 = سلوت 1-10، بلوك 2 = سلوت
-// 11-20، وهكذا) من غير ما تدخل بياناتها - تقدر تعدلها بعدين من شاشة الرسمة.
+// النحاس دي هتاخد منها (كابينة النحاس مسموح ليها بأب واحد بس طول عمرها -
+// الربط الفعلي بمصدر معين بيبقى بعدين لما رئيسي معين ياخد من بورت معين).
 
 import 'package:flutter/material.dart';
 
@@ -17,7 +14,6 @@ import '../models/cabinet_model.dart';
 import '../services/firestore_service.dart';
 import '../services/location_service.dart';
 import '../widgets/location_picker_map.dart';
-
 
 class AddCabinetScreen extends StatefulWidget {
   final String areaId;
@@ -32,9 +28,6 @@ class _AddCabinetScreenState extends State<AddCabinetScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
   final _codeController = TextEditingController();
-  final _mainPairsController = TextEditingController(text: '0');
-  final _boxBlocksLeftController = TextEditingController(text: '0');
-  final _boxBlocksRightController = TextEditingController(text: '0');
   final _notesController = TextEditingController();
   final _firestoreService = FirestoreService();
 
@@ -56,9 +49,6 @@ class _AddCabinetScreenState extends State<AddCabinetScreen> {
   void dispose() {
     _nameController.dispose();
     _codeController.dispose();
-    _mainPairsController.dispose();
-    _boxBlocksLeftController.dispose();
-    _boxBlocksRightController.dispose();
     _notesController.dispose();
     super.dispose();
   }
@@ -87,12 +77,6 @@ class _AddCabinetScreenState extends State<AddCabinetScreen> {
     }
   }
 
-  int get _mainPairsCount => int.tryParse(_mainPairsController.text.trim()) ?? 0;
-  int get _boxBlocksLeft =>
-      int.tryParse(_boxBlocksLeftController.text.trim()) ?? 0;
-  int get _boxBlocksRight =>
-      int.tryParse(_boxBlocksRightController.text.trim()) ?? 0;
-
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
     if (_latitude == null || _longitude == null) {
@@ -119,9 +103,6 @@ class _AddCabinetScreenState extends State<AddCabinetScreen> {
         areaId: widget.areaId,
         latitude: _latitude!,
         longitude: _longitude!,
-        mainPairsCount: _mainPairsCount,
-        boxBlocksLeft: _boxBlocksLeft,
-        boxBlocksRight: _boxBlocksRight,
         notes: _notesController.text.trim().isEmpty
             ? null
             : _notesController.text.trim(),
@@ -132,32 +113,6 @@ class _AddCabinetScreenState extends State<AddCabinetScreen> {
         await _firestoreService.linkCopperCabinetToParent(
           cabinetId,
           _sourceFiberCabinetId!,
-        );
-      }
-
-      // نولّد بوكسات فاضية تلقائيًا لكل بلوك اتحدد (شمال ويمين)، بنفس منطق
-      // الترقيم بتاع شاشة الرسمة: شمال بيبدأ من سلوت 1، يمين بعد كده مباشرة
-      if (_boxBlocksLeft > 0) {
-        await _firestoreService.generateEmptySlotBoxes(
-          parentCabinetId: cabinetId,
-          areaId: widget.areaId,
-          latitude: _latitude!,
-          longitude: _longitude!,
-          fromSlot: 1,
-          toSlot: _boxBlocksLeft * CabinetModel.boxesPerBlock,
-          namePrefix: _nameController.text.trim(),
-        );
-      }
-      if (_boxBlocksRight > 0) {
-        final rightStart = _boxBlocksLeft * CabinetModel.boxesPerBlock + 1;
-        await _firestoreService.generateEmptySlotBoxes(
-          parentCabinetId: cabinetId,
-          areaId: widget.areaId,
-          latitude: _latitude!,
-          longitude: _longitude!,
-          fromSlot: rightStart,
-          toSlot: rightStart + _boxBlocksRight * CabinetModel.boxesPerBlock - 1,
-          namePrefix: _nameController.text.trim(),
         );
       }
 
@@ -175,10 +130,6 @@ class _AddCabinetScreenState extends State<AddCabinetScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final mainPairBlocks = (_mainPairsCount / CabinetModel.mainPairsPerBlock).ceil();
-    final boxCapacity =
-        (_boxBlocksLeft + _boxBlocksRight) * CabinetModel.boxesPerBlock;
-
     return Scaffold(
       appBar: AppBar(title: const Text('إضافة كابينة جديدة')),
       body: SingleChildScrollView(
@@ -248,75 +199,29 @@ class _AddCabinetScreenState extends State<AddCabinetScreen> {
                 const SizedBox(height: 16),
                 _buildSourceFiberPicker(),
               ],
-              const SizedBox(height: 24),
-              Text('شكل البوكسات', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 4),
-              Text(
-                'كل بلوك = 10 بوكسات هتتولد فاضية تلقائيًا لحد ما تحفظ الكابينة. اسيبهم صفر لو الكابينة دي مفيهاش بوكسات مباشرة.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _boxBlocksLeftController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'بلوكات شمال',
-                        border: OutlineInputBorder(),
-                      ),
-                      onChanged: (_) => setState(() {}),
-                      validator: (v) =>
-                      int.tryParse((v ?? '').trim()) == null ? 'رقم؟' : null,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: TextFormField(
-                      controller: _boxBlocksRightController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: 'بلوكات يمين',
-                        border: OutlineInputBorder(),
-                      ),
-                      onChanged: (_) => setState(() {}),
-                      validator: (v) =>
-                      int.tryParse((v ?? '').trim()) == null ? 'رقم؟' : null,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'سعة البوكسات الكلية: $boxCapacity بوكس (هتتولد فاضية تلقائيًا)',
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 24),
-              Text('عدد الرئيسيات', style: Theme.of(context).textTheme.titleMedium),
-              const SizedBox(height: 4),
-              Text(
-                'هيتوزعوا تلقائيًا نص بنص بين عمود النص الشمال واليمين (كل بلوك = 100 رئيسي). اسيبها صفر لو مفيش.',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: _mainPairsController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'عدد الرئيسيات',
-                  border: OutlineInputBorder(),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(8),
                 ),
-                onChanged: (_) => setState(() {}),
-                validator: (v) =>
-                int.tryParse((v ?? '').trim()) == null ? 'اكتب رقم' : null,
+                child: const Row(
+                  children: [
+                    Icon(Icons.info_outline, size: 18, color: Colors.blue),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'شكل الكابينة من جوه (بلوكات بوكسات/رئيسيات وشيلفات بورتات) '
+                            'هتضيفه بعد كده من شاشة "الكابينة من جوه" - كل كابينة ممكن يبقى '
+                            'تصميمها مختلف عن التانية.',
+                        style: TextStyle(color: Colors.blue, fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                'هيبقى فيه $mainPairBlocks بلوك رئيسيات ($_mainPairsCount رئيسي)',
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 16),
               TextFormField(
                 controller: _notesController,
                 maxLines: 3,
@@ -404,8 +309,7 @@ class _AddCabinetScreenState extends State<AddCabinetScreen> {
               child: _isLocating
                   ? const Text('جاري تحديد الموقع...')
                   : _locationError != null
-                  ? Text(_locationError!,
-                  style: const TextStyle(color: Colors.red))
+                  ? Text(_locationError!, style: const TextStyle(color: Colors.red))
                   : Text(
                 'الموقع: ${_latitude!.toStringAsFixed(6)}, ${_longitude!.toStringAsFixed(6)}',
               ),

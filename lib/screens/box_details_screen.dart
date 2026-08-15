@@ -1,11 +1,11 @@
 // شاشة تفاصيل البوكس - بتعرض الترمنالات بتاعته
 // وبتسمح بتعديل كل ترمنال (رقم / عميل / حالة العزل / تعطيل / توصيل غير مباشر)
-// وكمان بتسمح بتبديل بيانات ترمنالين مع بعض، وتعديل بيانات البوكس نفسه (الاسم/السعة/الملاحظات)
+// وكمان بتسمح بتبديل بيانات ترمنالين مع بعض، وتعديل بيانات البوكس نفسه (الاسم/الملاحظات)
 // وتحريك مكان البوكس على الخريطة (زرار الـ pin في الـ AppBar)
 //
-// قاعدة مهمة: سعة البوكس لازم تكون من مضاعفات 10 (BoxModel.combCapacity)
-// لأن "المشط" الواحد الجاي من الكابينة سعته 10 بس - يعني بوكس سعته 20
-// معناه إنه بيشغل مشطين على الكابينة مش مشط واحد.
+// ملحوظة: سعة البوكس ثابتة دايمًا 10 ترمنال (نفس سعة البلوك) - مش قابلة للتعديل.
+// ربط الترمنال بمصدره (بورت/رئيسي) بيتحدد من شاشة الشيلف/بلوك الرئيسيات
+// (مش من هنا)، عشان تزامن الرقم عبر السلسلة يفضل من مكان واحد موحّد.
 
 import 'package:flutter/material.dart';
 
@@ -250,10 +250,7 @@ class _BoxDetailsScreenState extends State<BoxDetailsScreen> {
                   children: [
                     const Icon(Icons.inventory_2, color: Colors.green),
                     const SizedBox(width: 8),
-                    Text(
-                      'السعة: ${box.terminalsCount} ترمنال '
-                          '(${box.combsCount} ${box.combsCount == 1 ? "مشط" : "مشط"} على الكابينة)',
-                    ),
+                    Text('مكان ${box.positionInBlock} · ${box.terminalsCount} ترمنال'),
                   ],
                 ),
               ),
@@ -374,6 +371,18 @@ class _BoxDetailsScreenState extends State<BoxDetailsScreen> {
                                     color: _isolationColor(t.isolationStatus),
                                   ),
                                 ),
+                                if (t.sourceId != null)
+                                  const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.link, size: 12, color: Colors.teal),
+                                      SizedBox(width: 2),
+                                      Text(
+                                        'مربوط بمصدر',
+                                        style: TextStyle(fontSize: 10, color: Colors.teal),
+                                      ),
+                                    ],
+                                  ),
                                 if (t.crossConnectedTo != null)
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
@@ -435,7 +444,7 @@ class _BoxDetailsScreenState extends State<BoxDetailsScreen> {
             const SizedBox(height: 16),
             Text(
               'مفيش ترمنالات مسجلة على البوكس ده لسه\n'
-                  '(متوقع ${box.terminalsCount} ترمنال - ${box.combsCount} مشط)',
+                  '(متوقع ${box.terminalsCount} ترمنال)',
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 24),
@@ -457,7 +466,7 @@ class _BoxDetailsScreenState extends State<BoxDetailsScreen> {
   }
 }
 
-// شيت تعديل بيانات البوكس نفسه (الاسم / السعة / الملاحظات)
+// شيت تعديل بيانات البوكس نفسه (الاسم / الملاحظات - السعة ثابتة مش قابلة للتعديل)
 class _EditBoxInfoSheet extends StatefulWidget {
   final BoxModel box;
   final FirestoreService firestoreService;
@@ -473,88 +482,32 @@ class _EditBoxInfoSheet extends StatefulWidget {
 
 class _EditBoxInfoSheetState extends State<_EditBoxInfoSheet> {
   late TextEditingController _nameController;
-  late TextEditingController _countController;
   late TextEditingController _notesController;
   bool _isSaving = false;
-  String? _countError;
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.box.name);
-    _countController =
-        TextEditingController(text: widget.box.terminalsCount.toString());
     _notesController = TextEditingController(text: widget.box.notes ?? '');
   }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _countController.dispose();
     _notesController.dispose();
     super.dispose();
   }
 
-  int? get _parsedCount => int.tryParse(_countController.text.trim());
-
-  int get _combsPreview {
-    final count = _parsedCount ?? widget.box.terminalsCount;
-    return (count / BoxModel.combCapacity).ceil();
-  }
-
   Future<void> _save() async {
-    final newCount = _parsedCount;
-    if (newCount == null || !BoxModel.isValidTerminalsCount(newCount)) {
-      setState(() {
-        _countError =
-        'السعة لازم تكون رقم من مضاعفات ${BoxModel.combCapacity} (10, 20, 30...)';
-      });
-      return;
-    }
-    setState(() {
-      _countError = null;
-    });
-
-    // لو السعة الجديدة أقل من القديمة، نأكد الفني عارف إن الترمنالات القديمة
-    // فوق العدد الجديد مش هتتمسح، بس المعروض هيقل
-    if (newCount < widget.box.terminalsCount) {
-      final confirm = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('تقليل السعة'),
-          content: Text(
-            'السعة الجديدة (${newCount}) أقل من القديمة (${widget.box.terminalsCount}). '
-                'الترمنالات اللي فوق العدد الجديد مش هتتمسح من قاعدة البيانات. متأكد؟',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('إلغاء'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('تكملة'),
-            ),
-          ],
-        ),
-      );
-      if (confirm != true) return;
-    }
-
     setState(() => _isSaving = true);
     try {
       await widget.firestoreService.updateBox(widget.box.id, {
         'name': _nameController.text.trim(),
-        'terminalsCount': newCount,
         'notes': _notesController.text.trim().isEmpty
             ? null
             : _notesController.text.trim(),
       });
-      // لو السعة زادت، نولّد الترمنالات الجديدة الناقصة على طول
-      if (newCount > widget.box.terminalsCount) {
-        await widget.firestoreService
-            .ensureTerminalsCount(widget.box.id, newCount);
-      }
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (mounted) {
@@ -592,40 +545,6 @@ class _EditBoxInfoSheetState extends State<_EditBoxInfoSheet> {
                 labelText: 'اسم/كود البوكس',
                 prefixIcon: Icon(Icons.inventory_2_outlined),
                 border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _countController,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: 'السعة (عدد الترمنالات)',
-                helperText:
-                'لازم تكون مضاعف 10 - المشط الواحد من الكابينة بيشيل 10 بس',
-                errorText: _countError,
-                prefixIcon: const Icon(Icons.numbers),
-                border: const OutlineInputBorder(),
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.blue.shade50,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.info_outline, size: 18, color: Colors.blue),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'ده هيشغل $_combsPreview ${_combsPreview == 1 ? "مشط" : "مشط"} على الكابينة',
-                      style: const TextStyle(color: Colors.blue, fontSize: 13),
-                    ),
-                  ),
-                ],
               ),
             ),
             const SizedBox(height: 16),
@@ -767,6 +686,27 @@ class _EditTerminalSheetState extends State<_EditTerminalSheet> {
               'ترمنال رقم ${widget.terminal.terminalNumber}',
               style: Theme.of(context).textTheme.titleLarge,
             ),
+            if (widget.terminal.sourceId != null) ...[
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.teal.shade50,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.link, size: 14, color: Colors.teal),
+                    SizedBox(width: 4),
+                    Text(
+                      'الترمنال ده مربوط بمصدر (بورت/رئيسي) - عدّل الربط من شاشة المصدر',
+                      style: TextStyle(fontSize: 11, color: Colors.teal),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 12),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,

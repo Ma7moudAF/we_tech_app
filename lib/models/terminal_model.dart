@@ -42,11 +42,15 @@ class TerminalModel {
   final int? crossConnectedTo; // لو التوصيل مش مباشر: بيوصل فعليًا لترمنال رقم كام
   final String? notes; // أي ملاحظات إضافية
 
-  // مصدر خط الترمنال ده فعليًا: البورت أو الرئيسي اللي جاي منه.
-  // sourceCabinetId = نفس الكابينة الأب بتاعة البوكس (parentCabinetId) وقت الربط.
-  // sourceId = معرف البورت (لو الكابينة فايبر) أو الرئيسي (لو الكابينة نحاس).
-  // ده اللي بيخليك تدور بالرقم من الترمنال وتعرف الرئيسي والبورت اللي واخد منهم.
+  // مصدر خط الترمنال ده فعليًا: بورت أو رئيسي.
+  // sourceCabinetId = الكابينة اللي فيها المصدر (ممكن تختلف عن الكابينة
+  // الأب بتاعة البوكس نفسه - المصدر ممكن يكون في كابينة تانية).
+  // لو المصدر رئيسي: sourceBlockId (بلوك الرئيسيات) + sourceId (معرف الرئيسي).
+  // لو المصدر بورت: sourceShelfId (الشيلف) + sourceId (معرف البورت).
+  // الاتنين مش هيبقوا مليانين مع بعض في نفس الوقت - واحد بس حسب نوع المصدر.
   final String? sourceCabinetId;
+  final String? sourceBlockId; // لو المصدر رئيسي
+  final String? sourceShelfId; // لو المصدر بورت
   final String? sourceId;
 
   TerminalModel({
@@ -60,6 +64,8 @@ class TerminalModel {
     this.crossConnectedTo,
     this.notes,
     this.sourceCabinetId,
+    this.sourceBlockId,
+    this.sourceShelfId,
     this.sourceId,
   });
 
@@ -83,6 +89,8 @@ class TerminalModel {
       crossConnectedTo: map['crossConnectedTo'],
       notes: map['notes'],
       sourceCabinetId: map['sourceCabinetId'],
+      sourceBlockId: map['sourceBlockId'],
+      sourceShelfId: map['sourceShelfId'],
       sourceId: map['sourceId'],
     );
   }
@@ -98,6 +106,8 @@ class TerminalModel {
       'crossConnectedTo': crossConnectedTo,
       'notes': notes,
       'sourceCabinetId': sourceCabinetId,
+      'sourceBlockId': sourceBlockId,
+      'sourceShelfId': sourceShelfId,
       'sourceId': sourceId,
     };
   }
@@ -111,6 +121,8 @@ class TerminalModel {
     int? crossConnectedTo,
     String? notes,
     String? sourceCabinetId,
+    String? sourceBlockId,
+    String? sourceShelfId,
     String? sourceId,
   }) {
     return TerminalModel(
@@ -124,6 +136,8 @@ class TerminalModel {
       crossConnectedTo: crossConnectedTo ?? this.crossConnectedTo,
       notes: notes ?? this.notes,
       sourceCabinetId: sourceCabinetId ?? this.sourceCabinetId,
+      sourceBlockId: sourceBlockId ?? this.sourceBlockId,
+      sourceShelfId: sourceShelfId ?? this.sourceShelfId,
       sourceId: sourceId ?? this.sourceId,
     );
   }
