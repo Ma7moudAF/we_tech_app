@@ -27,6 +27,79 @@ class CabinetFloorPlanScreen extends StatefulWidget {
 
 class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
   final _firestoreService = FirestoreService();
+  bool _isAddingBlock = false;
+
+  // بيفتح دايالوج بسيط يختار منه الفني الجانب (شمال/يمين) ونوع البلوك
+  // (بوكسات/رئيسيات)، وبعدين بينفذ addBlock فعليًا في Firestore.
+  Future<void> _showAddBlockDialog() async {
+    BlockSide side = BlockSide.left;
+    BlockType type = BlockType.box;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('إضافة بلوك جديد'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('الجانب'),
+              const SizedBox(height: 4),
+              SegmentedButton<BlockSide>(
+                segments: const [
+                  ButtonSegment(value: BlockSide.left, label: Text('شمال')),
+                  ButtonSegment(value: BlockSide.right, label: Text('يمين')),
+                ],
+                selected: {side},
+                onSelectionChanged: (v) => setDialogState(() => side = v.first),
+              ),
+              const SizedBox(height: 16),
+              const Text('نوع البلوك'),
+              const SizedBox(height: 4),
+              SegmentedButton<BlockType>(
+                segments: const [
+                  ButtonSegment(value: BlockType.box, label: Text('بوكسات')),
+                  ButtonSegment(value: BlockType.mainPair, label: Text('رئيسيات')),
+                ],
+                selected: {type},
+                onSelectionChanged: (v) => setDialogState(() => type = v.first),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('إلغاء'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('إضافة'),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() => _isAddingBlock = true);
+    try {
+      await _firestoreService.addBlock(
+        cabinetId: widget.cabinet.id,
+        side: side,
+        type: type,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('حصل خطأ أثناء إضافة البلوك: $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isAddingBlock = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -46,6 +119,17 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
             ),
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: _isAddingBlock ? null : _showAddBlockDialog,
+        icon: _isAddingBlock
+            ? const SizedBox(
+          height: 16,
+          width: 16,
+          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+        )
+            : const Icon(Icons.add),
+        label: const Text('إضافة بلوك'),
       ),
       body: StreamBuilder<List<BlockModel>>(
         stream: _firestoreService.streamBlocks(cabinet.id),
@@ -130,7 +214,8 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
                 size: 64, color: Colors.grey.shade400),
             const SizedBox(height: 16),
             const Text(
-              'الكابينة دي لسه ملهاش شكل محدد (مفيش بلوكات بوكسات ولا رئيسيات)',
+              'الكابينة دي لسه ملهاش شكل محدد (مفيش بلوكات بوكسات ولا رئيسيات)\n'
+                  'دوس على "إضافة بلوك" تحت عشان تبدأ',
               textAlign: TextAlign.center,
             ),
           ],
