@@ -103,8 +103,8 @@ class _BoxesListScreenState extends State<BoxesListScreen> {
                 final filtered = _query.isEmpty
                     ? boxes
                     : boxes
-                        .where((b) => b.name.contains(_query))
-                        .toList();
+                    .where((b) => b.name.contains(_query))
+                    .toList();
 
                 if (filtered.isEmpty) {
                   return const Center(child: Text('مفيش بوكسات'));
@@ -121,7 +121,7 @@ class _BoxesListScreenState extends State<BoxesListScreen> {
                       leading: const Icon(Icons.inventory_2, color: Colors.green),
                       title: Text(box.name),
                       subtitle: Text(
-                        'سلوت ${box.slotNumber ?? '-'} · ${box.terminalsCount} ترمنال',
+                        'مكان ${box.positionInBlock} · ${box.terminalsCount} ترمنال',
                       ),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
