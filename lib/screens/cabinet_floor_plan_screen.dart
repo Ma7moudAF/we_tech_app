@@ -1,10 +1,13 @@
-// شاشة "الكابينة من جوه" - رسمة بصرية بالبلوكات:
+// شاشة "الكابينة من جوه" - رسمة بصرية بالبلوكات الفعلية المتخزنة في Firestore:
 // - عمود أقصى اليمين وعمود أقصى الشمال = بلوكات بوكسات (كل بلوك = 10 بوكسات)
-// - عمود النص اليمين وعمود النص الشمال = بلوكات رئيسيات (كل بلوك = 100 رئيسي / 10 أمشاط)
-// الترقيم في الاتنين (بوكسات ورئيسيات) بيبدأ من الشمال دايمًا
+// - عمود النص اليمين وعمود النص الشمال = بلوكات رئيسيات (كل بلوك = 10 رئيسي)
+// البلوكات بتتقرأ من streamBlocks (مش من حقول محسوبة على الكابينة - دي
+// مش موجودة أصلًا في CabinetModel). الترقيم (بوكسات ورئيسيات) بيبدأ من 1
+// جوه كل بلوك لوحده - مفيش رقم عام على الكابينة كلها.
 
 import 'package:flutter/material.dart';
 
+import '../models/block_model.dart';
 import '../models/box_model.dart';
 import '../models/cabinet_model.dart';
 import '../services/firestore_service.dart';
@@ -42,61 +45,74 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
               ),
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.list_alt),
-            tooltip: 'عرض الرئيسيات كليستة',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (context) => CabinetDetailsScreen(cabinet: cabinet),
-              ),
-            ),
-          ),
         ],
       ),
-      body: StreamBuilder<List<BoxModel>>(
-        stream: _firestoreService.streamBoxesForCabinet(cabinet.id),
-        builder: (context, boxesSnapshot) {
-          final boxes = boxesSnapshot.data ?? [];
+      body: StreamBuilder<List<BlockModel>>(
+        stream: _firestoreService.streamBlocks(cabinet.id),
+        builder: (context, blocksSnapshot) {
+          if (blocksSnapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          final blocks = blocksSnapshot.data ?? [];
 
-          if (cabinet.boxCapacity == 0 && cabinet.mainPairsCount == 0) {
+          if (blocks.isEmpty) {
             return _buildEmptyState();
           }
 
-          return Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(
-              // ترتيب الأعمدة من الشمال لليمين في الكود:
-              // بوكسات شمال (يبدأ الترقيم من هنا) - رئيسيات نص-شمال - رئيسيات نص-يمين - بوكسات يمين
-              // وبما إن التطبيق RTL، أول عنصر في الليستة بيظهر أقصى اليمين تلقائيًا
-              children: [
-                _buildBoxColumn(
-                  label: 'بوكسات يمين',
-                  blocksCount: cabinet.boxBlocksRight,
-                  startSlot: cabinet.boxBlocksLeft * CabinetModel.boxesPerBlock + 1,
-                  boxes: boxes,
+          final boxBlocksLeft = blocks
+              .where((b) => b.type == BlockType.box && b.side == BlockSide.left)
+              .toList()
+            ..sort((a, b) => a.blockNumber.compareTo(b.blockNumber));
+          final boxBlocksRight = blocks
+              .where((b) => b.type == BlockType.box && b.side == BlockSide.right)
+              .toList()
+            ..sort((a, b) => a.blockNumber.compareTo(b.blockNumber));
+          final mainPairBlocksLeft = blocks
+              .where((b) => b.type == BlockType.mainPair && b.side == BlockSide.left)
+              .toList()
+            ..sort((a, b) => a.blockNumber.compareTo(b.blockNumber));
+          final mainPairBlocksRight = blocks
+              .where((b) => b.type == BlockType.mainPair && b.side == BlockSide.right)
+              .toList()
+            ..sort((a, b) => a.blockNumber.compareTo(b.blockNumber));
+
+          return StreamBuilder<List<BoxModel>>(
+            stream: _firestoreService.streamBoxesForCabinet(cabinet.id),
+            builder: (context, boxesSnapshot) {
+              final boxes = boxesSnapshot.data ?? [];
+
+              return Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  // ترتيب الأعمدة من الشمال لليمين في الكود:
+                  // بوكسات شمال - رئيسيات نص-شمال - رئيسيات نص-يمين - بوكسات يمين
+                  // وبما إن التطبيق RTL، أول عنصر في الليستة بيظهر أقصى اليمين تلقائيًا
+                  children: [
+                    _buildBoxColumn(
+                      label: 'بوكسات يمين',
+                      blocks: boxBlocksRight,
+                      boxes: boxes,
+                    ),
+                    const SizedBox(width: 8),
+                    _buildMainPairColumn(
+                      label: 'رئيسيات يمين',
+                      blocks: mainPairBlocksRight,
+                    ),
+                    const SizedBox(width: 4),
+                    _buildMainPairColumn(
+                      label: 'رئيسيات شمال',
+                      blocks: mainPairBlocksLeft,
+                    ),
+                    const SizedBox(width: 8),
+                    _buildBoxColumn(
+                      label: 'بوكسات شمال',
+                      blocks: boxBlocksLeft,
+                      boxes: boxes,
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 8),
-                _buildMainPairColumn(
-                  label: 'رئيسيات يمين',
-                  blocksCount: cabinet.mainPairBlocksRight,
-                  startBlockIndex: cabinet.mainPairBlocksLeft,
-                ),
-                const SizedBox(width: 4),
-                _buildMainPairColumn(
-                  label: 'رئيسيات شمال',
-                  blocksCount: cabinet.mainPairBlocksLeft,
-                  startBlockIndex: 0,
-                ),
-                const SizedBox(width: 8),
-                _buildBoxColumn(
-                  label: 'بوكسات شمال',
-                  blocksCount: cabinet.boxBlocksLeft,
-                  startSlot: 1,
-                  boxes: boxes,
-                ),
-              ],
-            ),
+              );
+            },
           );
         },
       ),
@@ -125,11 +141,10 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
 
   Widget _buildBoxColumn({
     required String label,
-    required int blocksCount,
-    required int startSlot,
+    required List<BlockModel> blocks,
     required List<BoxModel> boxes,
   }) {
-    if (blocksCount == 0) return const SizedBox.shrink();
+    if (blocks.isEmpty) return const SizedBox.shrink();
     return Expanded(
       child: Column(
         children: [
@@ -137,21 +152,16 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
           const SizedBox(height: 4),
           Expanded(
             child: ListView.builder(
-              itemCount: blocksCount,
+              itemCount: blocks.length,
               itemBuilder: (context, i) {
-                final blockStart = startSlot + i * CabinetModel.boxesPerBlock;
-                final blockEnd = blockStart + CabinetModel.boxesPerBlock - 1;
-                final boxesInBlock = boxes
-                    .where((b) =>
-                        b.slotNumber != null &&
-                        b.slotNumber! >= blockStart &&
-                        b.slotNumber! <= blockEnd)
-                    .length;
+                final block = blocks[i];
+                final boxesInBlock =
+                    boxes.where((b) => b.blockId == block.id).length;
                 return _BlockTile(
                   color: Colors.green,
-                  title: 'بلوك بوكسات',
-                  subtitle: '$boxesInBlock/${CabinetModel.boxesPerBlock}',
-                  onTap: () => _openBoxBlock(blockStart, blockEnd, boxes),
+                  title: 'بلوك بوكسات ${block.blockNumber}',
+                  subtitle: '$boxesInBlock/${BlockModel.capacity}',
+                  onTap: () => _openBoxBlock(block, boxes),
                 );
               },
             ),
@@ -163,10 +173,9 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
 
   Widget _buildMainPairColumn({
     required String label,
-    required int blocksCount,
-    required int startBlockIndex,
+    required List<BlockModel> blocks,
   }) {
-    if (blocksCount == 0) return const SizedBox.shrink();
+    if (blocks.isEmpty) return const SizedBox.shrink();
     return Expanded(
       child: Column(
         children: [
@@ -174,16 +183,14 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
           const SizedBox(height: 4),
           Expanded(
             child: ListView.builder(
-              itemCount: blocksCount,
+              itemCount: blocks.length,
               itemBuilder: (context, i) {
-                final blockIndex = startBlockIndex + i;
-                final pairStart = blockIndex * CabinetModel.mainPairsPerBlock + 1;
-                final pairEnd = pairStart + CabinetModel.mainPairsPerBlock - 1;
+                final block = blocks[i];
                 return _BlockTile(
                   color: Colors.blue,
-                  title: 'بلوك رئيسيات',
-                  subtitle: '$pairStart - $pairEnd',
-                  onTap: () => _openMainPairBlock(pairStart, pairEnd),
+                  title: 'بلوك رئيسيات ${block.blockNumber}',
+                  subtitle: '1 - ${BlockModel.capacity}',
+                  onTap: () => _openMainPairBlock(block),
                 );
               },
             ),
@@ -193,7 +200,7 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
     );
   }
 
-  void _openBoxBlock(int blockStart, int blockEnd, List<BoxModel> boxes) {
+  void _openBoxBlock(BlockModel block, List<BoxModel> boxes) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -201,18 +208,17 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
         expand: false,
         initialChildSize: 0.6,
         builder: (context, scrollController) {
-          final slots = List.generate(
-              blockEnd - blockStart + 1, (i) => blockStart + i);
+          final positions = List.generate(BlockModel.capacity, (i) => i + 1);
           return ListView.separated(
             controller: scrollController,
             padding: const EdgeInsets.all(16),
-            itemCount: slots.length,
+            itemCount: positions.length,
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (context, i) {
-              final slot = slots[i];
+              final position = positions[i];
               BoxModel? box;
               for (final b in boxes) {
-                if (b.slotNumber == slot) {
+                if (b.blockId == block.id && b.positionInBlock == position) {
                   box = b;
                   break;
                 }
@@ -222,7 +228,7 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
                 return ListTile(
                   leading: const Icon(Icons.inventory_2, color: Colors.green),
                   title: Text(b.name),
-                  subtitle: Text('سلوت $slot · ${b.terminalsCount} ترمنال'),
+                  subtitle: Text('مكان $position · ${b.terminalsCount} ترمنال'),
                   trailing: const Icon(Icons.chevron_left),
                   onTap: () {
                     Navigator.pop(context);
@@ -237,7 +243,7 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
               }
               return ListTile(
                 leading: const Icon(Icons.add_circle_outline, color: Colors.grey),
-                title: Text('سلوت $slot فاضي'),
+                title: Text('مكان $position فاضي'),
                 subtitle: const Text('اضغط لإضافة بوكس هنا'),
                 onTap: () {
                   Navigator.pop(context);
@@ -257,16 +263,13 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
     );
   }
 
-  void _openMainPairBlock(int pairStart, int pairEnd) {
+  void _openMainPairBlock(BlockModel block) {
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => CabinetDetailsScreen(
           cabinet: widget.cabinet,
-          pairNumberRange: RangeValues(
-            pairStart.toDouble(),
-            pairEnd.toDouble(),
-          ),
+          block: block,
         ),
       ),
     );

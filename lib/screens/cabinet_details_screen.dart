@@ -1,13 +1,18 @@
-// شاشة تفاصيل الكابينة - بتعرض الرئيسيات (Main Pairs) بتاعتها
+// شاشة تفاصيل الكابينة - بتعرض رئيسيات بلوك معين بتاعتها
 // وبتسمح بتعديل حالة كل رئيسي (تعطيل / رقم تليفون / وجهة على بوكس + ترمنال محدد)
 //
-// ملحوظة مهمة: تحديد "وجهة" الرئيسي هنا مش تعديل حر - هو فعليًا بينفذ
-// setTerminalSource من اتجاه الرئيسي (بدل ما الترمنال هو اللي يختار مصدره
-// من شاشة البوكس، هنا بنختار من الرئيسي: رايح على أنهي بوكس وأنهي ترمنال
-// بالظبط جواه). ده بيحافظ على نفس تزامن رقم التليفون عبر السلسلة كلها.
+// ملحوظة مهمة: رقم الرئيسي (pairNumber) بيبقى من 1 لـ 10 بس جوه البلوك نفسه
+// (مش رقم عام على الكابينة كلها) - عشان كده الشاشة دي لازم تاخد بلوك محدد
+// (BlockModel) مش الكابينة لوحدها، وبتقرأ رئيسيات البلوك ده بس.
+//
+// تحديد "وجهة" الرئيسي هنا مش تعديل حر - هو فعليًا بينفذ setMainPairDestination
+// (بدل ما الترمنال هو اللي يختار مصدره من شاشة البوكس، هنا بنختار من الرئيسي:
+// رايح على أنهي بوكس وأنهي ترمنال بالظبط جواه). ده بيحافظ على نفس تزامن رقم
+// التليفون عبر السلسلة كلها.
 
 import 'package:flutter/material.dart';
 import 'move_location_screen.dart';
+import '../models/block_model.dart';
 import '../models/box_model.dart';
 import '../models/cabinet_model.dart';
 import '../models/main_pair_model.dart';
@@ -16,13 +21,12 @@ import '../services/firestore_service.dart';
 
 class CabinetDetailsScreen extends StatefulWidget {
   final CabinetModel cabinet;
-  // لو محددة، هتفلتر الليستة على رئيسيات البلوك ده بس (جاية من شاشة الرسمة)
-  final RangeValues? pairNumberRange;
+  final BlockModel block; // بلوك الرئيسيات المطلوب عرضه (كل بلوك = 10 رئيسي)
 
   const CabinetDetailsScreen({
     super.key,
     required this.cabinet,
-    this.pairNumberRange,
+    required this.block,
   });
 
   @override
@@ -33,7 +37,6 @@ class _CabinetDetailsScreenState extends State<CabinetDetailsScreen> {
   final _firestoreService = FirestoreService();
   final _searchController = TextEditingController();
   String _query = '';
-  bool _isGenerating = false;
 
   @override
   void dispose() {
@@ -41,23 +44,6 @@ class _CabinetDetailsScreenState extends State<CabinetDetailsScreen> {
     super.dispose();
   }
 
-  Future<void> _generatePairs() async {
-    setState(() => _isGenerating = true);
-    try {
-      await _firestoreService.generateMainPairs(
-        widget.cabinet.id,
-        widget.cabinet.mainPairsCount,
-      );
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('حصل خطأ: $e')),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _isGenerating = false);
-    }
-  }
   void _moveOnMap(CabinetModel cabinet) {
     Navigator.push(
       context,
@@ -77,6 +63,7 @@ class _CabinetDetailsScreenState extends State<CabinetDetailsScreen> {
       ),
     );
   }
+
   void _editPair(MainPairModel pair) {
     showModalBottomSheet(
       context: context,
@@ -84,6 +71,7 @@ class _CabinetDetailsScreenState extends State<CabinetDetailsScreen> {
       builder: (context) => _EditMainPairSheet(
         pair: pair,
         cabinet: widget.cabinet,
+        block: widget.block,
         firestoreService: _firestoreService,
       ),
     );
@@ -109,7 +97,9 @@ class _CabinetDetailsScreenState extends State<CabinetDetailsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.cabinet.name),
+        title: Text(
+          '${widget.cabinet.name} - بلوك رئيسيات ${widget.block.blockNumber} (${widget.block.side.labelAr})',
+        ),
         actions: [
           IconButton(
             icon: const Icon(Icons.pin_drop_outlined),
@@ -162,24 +152,22 @@ class _CabinetDetailsScreenState extends State<CabinetDetailsScreen> {
           ),
           Expanded(
             child: StreamBuilder<List<MainPairModel>>(
-              stream: _firestoreService.streamMainPairs(widget.cabinet.id),
+              stream: _firestoreService.streamMainPairsInBlock(
+                widget.cabinet.id,
+                widget.block.id,
+              ),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
                 final pairs = snapshot.data ?? [];
-                final rangeFiltered = widget.pairNumberRange == null
-                    ? pairs
-                    : pairs.where((p) =>
-                p.pairNumber >= widget.pairNumberRange!.start &&
-                    p.pairNumber <= widget.pairNumberRange!.end).toList();
-                if (rangeFiltered.isEmpty) {
+                if (pairs.isEmpty) {
                   return _buildEmptyState();
                 }
 
                 final filtered = _query.isEmpty
-                    ? rangeFiltered
-                    : rangeFiltered.where((p) {
+                    ? pairs
+                    : pairs.where((p) {
                   return p.pairNumber.toString().contains(_query) ||
                       p.locationLabel.contains(_query) ||
                       (p.phoneNumber ?? '').contains(_query);
@@ -260,22 +248,10 @@ class _CabinetDetailsScreenState extends State<CabinetDetailsScreen> {
           children: [
             Icon(Icons.dns_outlined, size: 64, color: Colors.grey.shade400),
             const SizedBox(height: 16),
-            Text(
-              'مفيش رئيسيات مسجلة على الكابينة دي لسه\n'
-                  '(متوقع ${widget.cabinet.mainPairsCount} رئيسي)',
+            const Text(
+              'مفيش رئيسيات في البلوك ده - ده مش المفروض يحصل لو البلوك '
+                  'اتضاف صح (البلوك بيتولدله 10 رئيسي أوتوماتيك وقت الإضافة).',
               textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            FilledButton.icon(
-              onPressed: _isGenerating ? null : _generatePairs,
-              icon: _isGenerating
-                  ? const SizedBox(
-                height: 16,
-                width: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-                  : const Icon(Icons.add),
-              label: const Text('توليد الرئيسيات'),
             ),
           ],
         ),
@@ -288,11 +264,13 @@ class _CabinetDetailsScreenState extends State<CabinetDetailsScreen> {
 class _EditMainPairSheet extends StatefulWidget {
   final MainPairModel pair;
   final CabinetModel cabinet;
+  final BlockModel block;
   final FirestoreService firestoreService;
 
   const _EditMainPairSheet({
     required this.pair,
     required this.cabinet,
+    required this.block,
     required this.firestoreService,
   });
 
@@ -304,7 +282,7 @@ class _EditMainPairSheetState extends State<_EditMainPairSheet> {
   late bool _isFaulty;
   late TextEditingController _phoneController;
 
-  // بوكس وترمنال الوجهة المختارين (بدل التحديد الحر القديم)
+  // بوكس وترمنال الوجهة المختارين
   String? _destinationBoxId;
   int? _destinationTerminalNumber;
   bool _isSaving = false;
@@ -316,8 +294,6 @@ class _EditMainPairSheetState extends State<_EditMainPairSheet> {
     _phoneController =
         TextEditingController(text: widget.pair.phoneNumber ?? '');
     _destinationBoxId = widget.pair.destinationBoxId;
-    // رقم الترمنال المحدد حاليًا بيتحدد لما نجيب ترمنالات البوكس (شوف
-    // _buildTerminalPicker) عشان لازم نلاقي رقمه مش معرفه بس
   }
 
   @override
@@ -336,12 +312,13 @@ class _EditMainPairSheetState extends State<_EditMainPairSheet> {
       // نحدّث حالة الرئيسي نفسها (تعطيل/رقم) الأول
       await widget.firestoreService.updateMainPair(
         widget.cabinet.id,
+        widget.block.id,
         widget.pair.id,
         {'isFaulty': _isFaulty, 'phoneNumber': phone},
       );
 
-      // لو محدد بوكس وترمنال، ننفذ setTerminalSource من اتجاه الرئيسي عشان
-      // يتزامن الرقم صح على طول السلسلة (ترمنال <-> رئيسي <-> بورت)
+      // لو محدد بوكس وترمنال، ننفذ setMainPairDestination عشان يتزامن الرقم
+      // صح على طول السلسلة (رئيسي <-> ترمنال <-> بورت)
       if (_destinationBoxId != null && _destinationTerminalNumber != null) {
         final terms = await widget.firestoreService
             .streamTerminals(_destinationBoxId!)
@@ -356,12 +333,12 @@ class _EditMainPairSheetState extends State<_EditMainPairSheet> {
         if (terminal == null) {
           throw Exception('الترمنال المختار مش موجود، حاول تاني');
         }
-        await widget.firestoreService.setTerminalSource(
+        await widget.firestoreService.setMainPairDestination(
+          copperCabinetId: widget.cabinet.id,
+          blockId: widget.block.id,
+          pairId: widget.pair.id,
           boxId: _destinationBoxId!,
           terminalId: terminal.id,
-          parentCabinetId: widget.cabinet.id,
-          parentCabinetType: CabinetType.copper,
-          sourceId: widget.pair.id,
           phoneNumber: phone,
         );
       }
@@ -370,7 +347,13 @@ class _EditMainPairSheetState extends State<_EditMainPairSheet> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e is Exception ? e.toString().replaceFirst('Exception: ', '') : 'حصل خطأ')),
+          SnackBar(
+            content: Text(
+              e is Exception
+                  ? e.toString().replaceFirst('Exception: ', '')
+                  : 'حصل خطأ',
+            ),
+          ),
         );
       }
     } finally {
@@ -397,7 +380,7 @@ class _EditMainPairSheetState extends State<_EditMainPairSheet> {
               style: Theme.of(context).textTheme.titleLarge,
             ),
             Text(
-              'رئيسي رقم ${widget.pair.pairNumber}',
+              'بلوك ${widget.block.blockNumber} (${widget.block.side.labelAr})',
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Colors.grey,
               ),
@@ -423,7 +406,10 @@ class _EditMainPairSheetState extends State<_EditMainPairSheet> {
             const SizedBox(height: 4),
             Text(
               'اختار البوكس وبعده رقم الترمنال بالظبط اللي الرئيسي ده واخده',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey),
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: Colors.grey),
             ),
             const SizedBox(height: 12),
             _buildBoxPicker(),
@@ -492,7 +478,6 @@ class _EditMainPairSheetState extends State<_EditMainPairSheet> {
           );
         }
 
-        // لو الرئيسي واخد فعليًا من ترمنال في البوكس ده، نحدده كقيمة افتراضية
         if (_destinationTerminalNumber == null &&
             widget.pair.destinationBoxId == _destinationBoxId &&
             widget.pair.destinationTerminalId != null) {
@@ -504,7 +489,8 @@ class _EditMainPairSheetState extends State<_EditMainPairSheet> {
           }
         }
 
-        final validValue = terminals.any((t) => t.terminalNumber == _destinationTerminalNumber)
+        final validValue =
+        terminals.any((t) => t.terminalNumber == _destinationTerminalNumber)
             ? _destinationTerminalNumber
             : null;
 

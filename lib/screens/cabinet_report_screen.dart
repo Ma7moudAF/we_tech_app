@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../models/block_model.dart';
 import '../models/box_model.dart';
 import '../models/cabinet_model.dart';
 import '../models/main_pair_model.dart';
@@ -35,17 +36,33 @@ class _CabinetReportScreenState extends State<CabinetReportScreen> {
       final arabicFont = await PdfGoogleFonts.notoNaskhArabicRegular();
       final arabicBold = await PdfGoogleFonts.notoNaskhArabicBold();
 
-      final mainPairs =
-          await _firestoreService.streamMainPairs(widget.cabinet.id).first;
-      final boxes = await _firestoreService
-          .streamBoxesForCabinet(widget.cabinet.id)
-          .first;
+      // بلوكات الكابينة الفعلية (بوكسات/رئيسيات) - مفيش أعداد محسوبة على
+      // الكابينة نفسها، لازم نقراها من الـ blocks subcollection
+      final blocks =
+      await _firestoreService.streamBlocks(widget.cabinet.id).first;
+      final mainPairBlocks =
+      blocks.where((b) => b.type == BlockType.mainPair).toList()
+        ..sort((a, b) => a.blockNumber.compareTo(b.blockNumber));
+
+      final boxes =
+      await _firestoreService.streamBoxesForCabinet(widget.cabinet.id).first;
+
+      // رئيسيات كل بلوك رئيسيات (pairNumber بيبقى 1-10 جوه كل بلوك بس،
+      // مش رقم عام على الكابينة كلها)
+      final Map<String, List<MainPairModel>> pairsByBlock = {};
+      if (_order == ReportOrder.byMainPairs) {
+        for (final block in mainPairBlocks) {
+          pairsByBlock[block.id] = await _firestoreService
+              .streamMainPairsInBlock(widget.cabinet.id, block.id)
+              .first;
+        }
+      }
 
       final Map<String, List<TerminalModel>> terminalsByBox = {};
       if (_order == ReportOrder.byBoxes) {
         for (final box in boxes) {
           terminalsByBox[box.id] =
-              await _firestoreService.streamTerminals(box.id).first;
+          await _firestoreService.streamTerminals(box.id).first;
         }
       }
 
@@ -65,7 +82,7 @@ class _CabinetReportScreenState extends State<CabinetReportScreen> {
             pw.Text('النوع: ${widget.cabinet.type.labelAr}'),
             pw.SizedBox(height: 12),
             if (_order == ReportOrder.byMainPairs)
-              ..._buildMainPairsSection(mainPairs)
+              ..._buildMainPairsSection(mainPairBlocks, pairsByBlock)
             else
               ..._buildBoxesSection(boxes, terminalsByBox),
           ],
@@ -86,39 +103,54 @@ class _CabinetReportScreenState extends State<CabinetReportScreen> {
     }
   }
 
-  List<pw.Widget> _buildMainPairsSection(List<MainPairModel> pairs) {
-    return [
+  List<pw.Widget> _buildMainPairsSection(
+      List<BlockModel> blocks,
+      Map<String, List<MainPairModel>> pairsByBlock,
+      ) {
+    final totalPairs =
+    pairsByBlock.values.fold<int>(0, (sum, list) => sum + list.length);
+
+    final widgets = <pw.Widget>[
       pw.Text(
-        'الرئيسيات (${pairs.length})',
+        'الرئيسيات (إجمالي $totalPairs في ${blocks.length} بلوك)',
         style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
       ),
-      pw.SizedBox(height: 6),
-      pw.TableHelper.fromTextArray(
-        headers: ['الرقم', 'المكان', 'الحالة', 'رقم الهاتف', 'الوجهة'],
+    ];
+
+    for (final block in blocks) {
+      final pairs = pairsByBlock[block.id] ?? [];
+      widgets.add(pw.SizedBox(height: 10));
+      widgets.add(pw.Text(
+        'بلوك رئيسيات ${block.blockNumber} (${block.side.labelAr})',
+        style: pw.TextStyle(fontSize: 13, fontWeight: pw.FontWeight.bold),
+      ));
+      widgets.add(pw.TableHelper.fromTextArray(
+        headers: ['الرقم', 'المكان', 'الحالة', 'رقم الهاتف', 'واخد من بوكس؟'],
         data: pairs
             .map((p) => [
-                  p.pairNumber.toString(),
-                  p.locationLabel,
-                  p.isFaulty
-                      ? 'معطل'
-                      : (p.phoneNumber != null ? 'مشغول' : 'فاضي'),
-                  p.phoneNumber ?? '-',
-                  p.destinationType?.labelAr ?? '-',
-                ])
+          p.pairNumber.toString(),
+          p.locationLabel,
+          p.isFaulty
+              ? 'معطل'
+              : (p.phoneNumber != null ? 'مشغول' : 'فاضي'),
+          p.phoneNumber ?? '-',
+          p.destinationBoxId != null ? 'نعم' : '-',
+        ])
             .toList(),
-      ),
-    ];
+      ));
+    }
+    return widgets;
   }
 
   List<pw.Widget> _buildBoxesSection(
-    List<BoxModel> boxes,
-    Map<String, List<TerminalModel>> terminalsByBox,
-  ) {
+      List<BoxModel> boxes,
+      Map<String, List<TerminalModel>> terminalsByBox,
+      ) {
     final widgets = <pw.Widget>[];
     for (final box in boxes) {
       widgets.add(pw.SizedBox(height: 10));
       widgets.add(pw.Text(
-        '${box.name} (سلوت ${box.slotNumber ?? '-'})',
+        '${box.name} (مكان ${box.positionInBlock})',
         style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
       ));
       final terms = terminalsByBox[box.id] ?? [];
@@ -126,13 +158,13 @@ class _CabinetReportScreenState extends State<CabinetReportScreen> {
         headers: ['الترمنال', 'الرقم', 'العميل', 'النوع', 'العزل', 'معطل'],
         data: terms
             .map((t) => [
-                  t.terminalNumber.toString(),
-                  t.phoneNumber ?? '-',
-                  t.customerName ?? '-',
-                  t.customerType?.labelAr ?? '-',
-                  t.isolationStatus.labelAr,
-                  t.isFaulty ? 'نعم' : 'لا',
-                ])
+          t.terminalNumber.toString(),
+          t.phoneNumber ?? '-',
+          t.customerName ?? '-',
+          t.customerType?.labelAr ?? '-',
+          t.isolationStatus.labelAr,
+          t.isFaulty ? 'نعم' : 'لا',
+        ])
             .toList(),
       ));
     }
@@ -170,10 +202,10 @@ class _CabinetReportScreenState extends State<CabinetReportScreen> {
               onPressed: _isGenerating ? null : _generateAndShowPdf,
               icon: _isGenerating
                   ? const SizedBox(
-                      height: 16,
-                      width: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
+                height: 16,
+                width: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
                   : const Icon(Icons.print),
               label: const Text('إنشاء ومعاينة التقرير'),
             ),
