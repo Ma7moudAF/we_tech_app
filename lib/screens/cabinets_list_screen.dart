@@ -105,13 +105,28 @@ class _CabinetsListScreenState extends State<CabinetsListScreen> {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
                 }
+                // مؤقت للتشخيص: لو فيه مشكلة صلاحيات (Security Rules) أو أي
+                // خطأ تاني في القراءة، هيبان هنا واضح بدل ما يتبلع بصمت
+                // ويظهر "مفيش كبائن" وكأنها مفيش بيانات فعلًا.
+                if (snapshot.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text(
+                        'حصل خطأ أثناء قراءة الكبائن:\n${snapshot.error}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.red),
+                      ),
+                    ),
+                  );
+                }
                 final cabinets = snapshot.data ?? [];
                 final filtered = _query.isEmpty
                     ? cabinets
                     : cabinets
-                        .where((c) =>
-                            c.name.contains(_query) || c.code.contains(_query))
-                        .toList();
+                    .where((c) =>
+                c.name.contains(_query) || c.code.contains(_query))
+                    .toList();
 
                 if (filtered.isEmpty) {
                   return const Center(child: Text('مفيش كبائن'));

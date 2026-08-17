@@ -4,6 +4,11 @@
 // البلوكات بتتقرأ من streamBlocks (مش من حقول محسوبة على الكابينة - دي
 // مش موجودة أصلًا في CabinetModel). الترقيم (بوكسات ورئيسيات) بيبدأ من 1
 // جوه كل بلوك لوحده - مفيش رقم عام على الكابينة كلها.
+//
+// وضع "التعديل الحر" (زرار القلم في الـ AppBar): بيسمح بسحب البلوكات لإعادة
+// ترتيبها جوه نفس العمود، وبزرار "نقل للجانب التاني" على كل بلوك. البيانات
+// (BlockModel) معندهاش إحداثيات X/Y، فمفيش تحريك حر بمعنى فوتوشوب - اللي
+// بيتغير فعليًا هو blockNumber (الترتيب) و side (الجانب).
 
 import 'package:flutter/material.dart';
 
@@ -15,6 +20,7 @@ import 'add_box_screen.dart';
 import 'box_details_screen.dart';
 import 'cabinet_details_screen.dart';
 import 'cabinet_report_screen.dart';
+import 'shelf_list_screen.dart';
 
 class CabinetFloorPlanScreen extends StatefulWidget {
   final CabinetModel cabinet;
@@ -28,6 +34,11 @@ class CabinetFloorPlanScreen extends StatefulWidget {
 class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
   final _firestoreService = FirestoreService();
   bool _isAddingBlock = false;
+  bool _editMode = false;
+
+  // آخر نسخة من البلوكات وصلتنا من الـ stream - محتاجينها في _swapBlockSide
+  // عشان نحسب رقم البلوك التالي في الجانب المستهدف
+  List<BlockModel> _currentBlocks = [];
 
   // بيفتح دايالوج بسيط يختار منه الفني الجانب (شمال/يمين) ونوع البلوك
   // (بوكسات/رئيسيات)، وبعدين بينفذ addBlock فعليًا في Firestore.
@@ -101,6 +112,60 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
     }
   }
 
+  // بينقل بلوك للجانب التاني (شمال <-> يمين) - رقمه الجديد بيبقى آخر رقم في
+  // الجانب المستهدف + 1 (زي addBlock بالظبط)
+  Future<void> _swapBlockSide(BlockModel block) async {
+    final targetSide =
+    block.side == BlockSide.left ? BlockSide.right : BlockSide.left;
+    final sameTypeTargetSide = _currentBlocks
+        .where((b) => b.type == block.type && b.side == targetSide)
+        .toList();
+    final nextNumber = sameTypeTargetSide.isEmpty
+        ? 1
+        : (sameTypeTargetSide.map((b) => b.blockNumber).reduce((a, b) => a > b ? a : b) + 1);
+
+    try {
+      await _firestoreService.updateBlock(widget.cabinet.id, block.id, {
+        'side': targetSide.name,
+        'blockNumber': nextNumber,
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('حصل خطأ أثناء نقل البلوك: $e')),
+        );
+      }
+    }
+  }
+
+  // بيعيد ترقيم بلوكات عمود واحد (1..N) بناءً على الترتيب الجديد بعد السحب،
+  // وبيحدّث في Firestore بس اللي رقمه اتغيّر فعليًا
+  Future<void> _reorderBlocks(
+      List<BlockModel> columnBlocks, int oldIndex, int newIndex) async {
+    final list = List<BlockModel>.from(columnBlocks);
+    if (newIndex > oldIndex) newIndex -= 1;
+    final moved = list.removeAt(oldIndex);
+    list.insert(newIndex, moved);
+
+    for (int i = 0; i < list.length; i++) {
+      final newNumber = i + 1;
+      if (list[i].blockNumber != newNumber) {
+        try {
+          await _firestoreService.updateBlock(widget.cabinet.id, list[i].id, {
+            'blockNumber': newNumber,
+          });
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('حصل خطأ أثناء إعادة الترتيب: $e')),
+            );
+          }
+          return;
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final cabinet = widget.cabinet;
@@ -108,6 +173,20 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
       appBar: AppBar(
         title: Text('${cabinet.name} - من جوه'),
         actions: [
+          if (cabinet.type == CabinetType.portBox)
+            IconButton(
+              icon: const Icon(Icons.view_module_outlined),
+              tooltip: 'الشيلفات (بورتات الفيبر)',
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => ShelvesListScreen(
+                    fiberCabinetId: cabinet.id,
+                    cabinetName: cabinet.name,
+                  ),
+                ),
+              ),
+            ),
           IconButton(
             icon: const Icon(Icons.print_outlined),
             tooltip: 'طباعة تقرير الكابينة',
@@ -117,6 +196,11 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
                 builder: (context) => CabinetReportScreen(cabinet: cabinet),
               ),
             ),
+          ),
+          IconButton(
+            icon: Icon(_editMode ? Icons.done : Icons.edit_outlined),
+            tooltip: _editMode ? 'تم' : 'تعديل حر (ترتيب/نقل البلوكات)',
+            onPressed: () => setState(() => _editMode = !_editMode),
           ),
         ],
       ),
@@ -138,6 +222,7 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           final blocks = blocksSnapshot.data ?? [];
+          _currentBlocks = blocks;
 
           if (blocks.isEmpty) {
             return _buildEmptyState();
@@ -160,43 +245,60 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
               .toList()
             ..sort((a, b) => a.blockNumber.compareTo(b.blockNumber));
 
-          return StreamBuilder<List<BoxModel>>(
-            stream: _firestoreService.streamBoxesForCabinet(cabinet.id),
-            builder: (context, boxesSnapshot) {
-              final boxes = boxesSnapshot.data ?? [];
-
-              return Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  // ترتيب الأعمدة من الشمال لليمين في الكود:
-                  // بوكسات شمال - رئيسيات نص-شمال - رئيسيات نص-يمين - بوكسات يمين
-                  // وبما إن التطبيق RTL، أول عنصر في الليستة بيظهر أقصى اليمين تلقائيًا
-                  children: [
-                    _buildBoxColumn(
-                      label: 'بوكسات يمين',
-                      blocks: boxBlocksRight,
-                      boxes: boxes,
-                    ),
-                    const SizedBox(width: 8),
-                    _buildMainPairColumn(
-                      label: 'رئيسيات يمين',
-                      blocks: mainPairBlocksRight,
-                    ),
-                    const SizedBox(width: 4),
-                    _buildMainPairColumn(
-                      label: 'رئيسيات شمال',
-                      blocks: mainPairBlocksLeft,
-                    ),
-                    const SizedBox(width: 8),
-                    _buildBoxColumn(
-                      label: 'بوكسات شمال',
-                      blocks: boxBlocksLeft,
-                      boxes: boxes,
-                    ),
-                  ],
+          return Column(
+            children: [
+              if (_editMode)
+                Container(
+                  width: double.infinity,
+                  color: Colors.teal.shade50,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: const Text(
+                    'وضع التعديل الحر شغال - اسحب البلوكات لترتيبها في نفس العمود، '
+                        'أو دوس على ⇄ عشان تنقل بلوك للجانب التاني',
+                    style: TextStyle(color: Colors.teal, fontSize: 12),
+                  ),
                 ),
-              );
-            },
+              Expanded(
+                child: StreamBuilder<List<BoxModel>>(
+                  stream: _firestoreService.streamBoxesForCabinet(cabinet.id),
+                  builder: (context, boxesSnapshot) {
+                    final boxes = boxesSnapshot.data ?? [];
+
+                    return Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        // ترتيب الأعمدة من الشمال لليمين في الكود:
+                        // بوكسات شمال - رئيسيات نص-شمال - رئيسيات نص-يمين - بوكسات يمين
+                        // وبما إن التطبيق RTL، أول عنصر في الليستة بيظهر أقصى اليمين تلقائيًا
+                        children: [
+                          _buildBoxColumn(
+                            label: 'بوكسات يمين',
+                            blocks: boxBlocksRight,
+                            boxes: boxes,
+                          ),
+                          const SizedBox(width: 8),
+                          _buildMainPairColumn(
+                            label: 'رئيسيات يمين',
+                            blocks: mainPairBlocksRight,
+                          ),
+                          const SizedBox(width: 4),
+                          _buildMainPairColumn(
+                            label: 'رئيسيات شمال',
+                            blocks: mainPairBlocksLeft,
+                          ),
+                          const SizedBox(width: 8),
+                          _buildBoxColumn(
+                            label: 'بوكسات شمال',
+                            blocks: boxBlocksLeft,
+                            boxes: boxes,
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ],
           );
         },
       ),
@@ -229,14 +331,32 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
     required List<BlockModel> blocks,
     required List<BoxModel> boxes,
   }) {
-    if (blocks.isEmpty) return const SizedBox.shrink();
+    if (blocks.isEmpty && !_editMode) return const SizedBox.shrink();
     return Expanded(
       child: Column(
         children: [
           Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
           const SizedBox(height: 4),
           Expanded(
-            child: ListView.builder(
+            child: _editMode
+                ? ReorderableListView.builder(
+              itemCount: blocks.length,
+              onReorder: (oldIndex, newIndex) =>
+                  _reorderBlocks(blocks, oldIndex, newIndex),
+              itemBuilder: (context, i) {
+                final block = blocks[i];
+                final boxesInBlock =
+                    boxes.where((b) => b.blockId == block.id).length;
+                return _EditableBlockTile(
+                  key: ValueKey(block.id),
+                  color: Colors.green,
+                  title: 'بلوك بوكسات ${block.blockNumber} (${block.side.labelAr})',
+                  subtitle: '$boxesInBlock/${BlockModel.capacity}',
+                  onSwapSide: () => _swapBlockSide(block),
+                );
+              },
+            )
+                : ListView.builder(
               itemCount: blocks.length,
               itemBuilder: (context, i) {
                 final block = blocks[i];
@@ -244,7 +364,7 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
                     boxes.where((b) => b.blockId == block.id).length;
                 return _BlockTile(
                   color: Colors.green,
-                  title: 'بلوك بوكسات ${block.blockNumber}',
+                  title: 'بلوك بوكسات ${block.blockNumber} (${block.side.labelAr})',
                   subtitle: '$boxesInBlock/${BlockModel.capacity}',
                   onTap: () => _openBoxBlock(block, boxes),
                 );
@@ -260,20 +380,36 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
     required String label,
     required List<BlockModel> blocks,
   }) {
-    if (blocks.isEmpty) return const SizedBox.shrink();
+    if (blocks.isEmpty && !_editMode) return const SizedBox.shrink();
     return Expanded(
       child: Column(
         children: [
           Text(label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
           const SizedBox(height: 4),
           Expanded(
-            child: ListView.builder(
+            child: _editMode
+                ? ReorderableListView.builder(
+              itemCount: blocks.length,
+              onReorder: (oldIndex, newIndex) =>
+                  _reorderBlocks(blocks, oldIndex, newIndex),
+              itemBuilder: (context, i) {
+                final block = blocks[i];
+                return _EditableBlockTile(
+                  key: ValueKey(block.id),
+                  color: Colors.blue,
+                  title: 'بلوك رئيسيات ${block.blockNumber} (${block.side.labelAr})',
+                  subtitle: '1 - ${BlockModel.capacity}',
+                  onSwapSide: () => _swapBlockSide(block),
+                );
+              },
+            )
+                : ListView.builder(
               itemCount: blocks.length,
               itemBuilder: (context, i) {
                 final block = blocks[i];
                 return _BlockTile(
                   color: Colors.blue,
-                  title: 'بلوك رئيسيات ${block.blockNumber}',
+                  title: 'بلوك رئيسيات ${block.blockNumber} (${block.side.labelAr})',
                   subtitle: '1 - ${BlockModel.capacity}',
                   onTap: () => _openMainPairBlock(block),
                 );
@@ -335,8 +471,16 @@ class _CabinetFloorPlanScreenState extends State<CabinetFloorPlanScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) =>
-                          AddBoxScreen(areaId: widget.cabinet.areaId),
+                      builder: (context) => AddBoxScreen(
+                        areaId: widget.cabinet.areaId,
+                        initialParentCabinetId: widget.cabinet.id,
+                        initialParentCabinetLabel:
+                        '${widget.cabinet.name} (${widget.cabinet.code})',
+                        initialBlockId: block.id,
+                        initialBlockLabel:
+                        'بلوك بوكسات ${block.blockNumber} (${block.side.labelAr})',
+                        initialPositionInBlock: position,
+                      ),
                     ),
                   );
                 },
@@ -395,6 +539,60 @@ class _BlockTile extends StatelessWidget {
               Text(subtitle, style: const TextStyle(fontSize: 11)),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+// نفس شكل _BlockTile بس بمقبض سحب وزرار "نقل للجانب التاني" - يظهر في وضع
+// التعديل الحر بس. ملهوش onTap للفتح عشان السحب ميتعارضش مع فتح الشاشة.
+class _EditableBlockTile extends StatelessWidget {
+  final Color color;
+  final String title;
+  final String subtitle;
+  final VoidCallback onSwapSide;
+
+  const _EditableBlockTile({
+    super.key,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+    required this.onSwapSide,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.12),
+          border: Border.all(color: color),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.drag_handle, size: 16, color: Colors.grey),
+            Expanded(
+              child: Column(
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          fontSize: 10, color: color, fontWeight: FontWeight.bold)),
+                  Text(subtitle, style: const TextStyle(fontSize: 11)),
+                ],
+              ),
+            ),
+            IconButton(
+              icon: const Icon(Icons.swap_horiz, size: 18),
+              tooltip: 'انقل للجانب التاني',
+              onPressed: onSwapSide,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(),
+            ),
+          ],
         ),
       ),
     );

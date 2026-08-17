@@ -12,7 +12,24 @@ import '../services/location_service.dart';
 class AddBoxScreen extends StatefulWidget {
   final String areaId;
 
-  const AddBoxScreen({super.key, required this.areaId});
+  // لو الشاشة دي اتفتحت من "مكان فاضي" جوه بلوك معين (من شاشة الكابينة من
+  // جوه)، الكابينة/البلوك/المكان بيوصلوا جاهزين هنا وبيتقفلوا (read-only) -
+  // الفني مش محتاج يختارهم تاني، لأنه أصلاً دوس على المكان ده بالظبط.
+  final String? initialParentCabinetId;
+  final String? initialParentCabinetLabel;
+  final String? initialBlockId;
+  final String? initialBlockLabel;
+  final int? initialPositionInBlock;
+
+  const AddBoxScreen({
+    super.key,
+    required this.areaId,
+    this.initialParentCabinetId,
+    this.initialParentCabinetLabel,
+    this.initialBlockId,
+    this.initialBlockLabel,
+    this.initialPositionInBlock,
+  });
 
   @override
   State<AddBoxScreen> createState() => _AddBoxScreenState();
@@ -36,8 +53,19 @@ class _AddBoxScreenState extends State<AddBoxScreen> {
   @override
   void initState() {
     super.initState();
+    // لو جايين من "مكان فاضي" جوه بلوك محدد، نثبت القيم دي من الأول
+    _parentCabinetId = widget.initialParentCabinetId;
+    _blockId = widget.initialBlockId;
+    _positionInBlock = widget.initialPositionInBlock;
     _captureLocation();
   }
+
+  // true لو الكابينة/البلوك/المكان كلهم جايين جاهزين من قبل (يعني الفني
+  // دوس على مكان فاضي بالظبط) - في الحالة دي بنقفل الاختيار ونعرضه للقراءة بس
+  bool get _isLocationPrefilled =>
+      widget.initialParentCabinetId != null &&
+          widget.initialBlockId != null &&
+          widget.initialPositionInBlock != null;
 
   @override
   void dispose() {
@@ -146,38 +174,42 @@ class _AddBoxScreenState extends State<AddBoxScreen> {
                 (v == null || v.trim().isEmpty) ? 'اكتب اسم البوكس' : null,
               ),
               const SizedBox(height: 16),
-              StreamBuilder<List<CabinetModel>>(
-                stream: _firestoreService.streamCabinets(widget.areaId),
-                builder: (context, snapshot) {
-                  final cabinets = snapshot.data ?? [];
-                  final validValue = cabinets.any((c) => c.id == _parentCabinetId)
-                      ? _parentCabinetId
-                      : null;
-                  return DropdownButtonFormField<String>(
-                    initialValue: validValue,
-                    decoration: const InputDecoration(
-                      labelText: 'الكابينة الأب',
-                      border: OutlineInputBorder(),
-                    ),
-                    items: cabinets
-                        .map((c) => DropdownMenuItem(
-                      value: c.id,
-                      child: Text('${c.name} (${c.type.labelAr})'),
-                    ))
-                        .toList(),
-                    onChanged: (v) => setState(() {
-                      _parentCabinetId = v;
-                      _blockId = null;
-                      _positionInBlock = null;
-                    }),
-                    validator: (v) => v == null ? 'اختار الكابينة الأب' : null,
-                  );
-                },
-              ),
-              const SizedBox(height: 16),
-              if (_parentCabinetId != null) _buildBlockPicker(),
-              const SizedBox(height: 16),
-              if (_blockId != null) _buildPositionPicker(),
+              if (_isLocationPrefilled)
+                _buildPrefilledLocationCard()
+              else ...[
+                StreamBuilder<List<CabinetModel>>(
+                  stream: _firestoreService.streamCabinets(widget.areaId),
+                  builder: (context, snapshot) {
+                    final cabinets = snapshot.data ?? [];
+                    final validValue = cabinets.any((c) => c.id == _parentCabinetId)
+                        ? _parentCabinetId
+                        : null;
+                    return DropdownButtonFormField<String>(
+                      initialValue: validValue,
+                      decoration: const InputDecoration(
+                        labelText: 'الكابينة الأب',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: cabinets
+                          .map((c) => DropdownMenuItem(
+                        value: c.id,
+                        child: Text('${c.name} (${c.type.labelAr})'),
+                      ))
+                          .toList(),
+                      onChanged: (v) => setState(() {
+                        _parentCabinetId = v;
+                        _blockId = null;
+                        _positionInBlock = null;
+                      }),
+                      validator: (v) => v == null ? 'اختار الكابينة الأب' : null,
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+                if (_parentCabinetId != null) _buildBlockPicker(),
+                const SizedBox(height: 16),
+                if (_blockId != null) _buildPositionPicker(),
+              ],
               const SizedBox(height: 16),
               TextFormField(
                 controller: _notesController,
@@ -208,6 +240,53 @@ class _AddBoxScreenState extends State<AddBoxScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildPrefilledLocationCard() {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.teal.shade50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.teal.shade100),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.check_circle, size: 16, color: Colors.teal),
+              const SizedBox(width: 6),
+              const Text(
+                'المكان محدد تلقائيًا',
+                style: TextStyle(color: Colors.teal, fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          _prefilledRow(Icons.hub_outlined, 'الكابينة', widget.initialParentCabinetLabel ?? '-'),
+          const SizedBox(height: 4),
+          _prefilledRow(Icons.widgets_outlined, 'البلوك', widget.initialBlockLabel ?? '-'),
+          const SizedBox(height: 4),
+          _prefilledRow(Icons.pin_outlined, 'المكان جوه البلوك',
+              'مكان ${widget.initialPositionInBlock}'),
+        ],
+      ),
+    );
+  }
+
+  Widget _prefilledRow(IconData icon, String label, String value) {
+    return Row(
+      children: [
+        Icon(icon, size: 16, color: Colors.teal),
+        const SizedBox(width: 6),
+        Text('$label: ', style: const TextStyle(fontSize: 13, color: Colors.grey)),
+        Expanded(
+          child: Text(value,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+        ),
+      ],
     );
   }
 

@@ -126,14 +126,20 @@ class FirestoreService {
     required BlockType type,
   }) async {
     final blocksRef = _db.collection('cabinets').doc(cabinetId).collection('blocks');
-    final existingInSide = await blocksRef
-        .where('side', isEqualTo: side.name)
-        .orderBy('blockNumber', descending: true)
-        .limit(1)
-        .get();
+    // ملحوظة: قصدًا مش بنستخدم orderBy مع where(side) هنا، عشان الجمع بين
+    // where وorderBy على حقلين مختلفين بيستلزم composite index في Firestore
+    // (لو مش موجود، الـ query بتفشل بالكامل بـ FAILED_PRECONDITION وبتوقف
+    // تحميل بيانات تانية معاها). بنجيب كل بلوكات نفس الجانب ونحسب أكبر رقم
+    // في الكود بدل كده - أبطأ شوية لو فيه مئات البلوكات، لكن آمن من غير أي
+    // إعداد إضافي على Firestore.
+    final existingInSide =
+    await blocksRef.where('side', isEqualTo: side.name).get();
     final nextNumber = existingInSide.docs.isEmpty
         ? 1
-        : ((existingInSide.docs.first.data()['blockNumber'] ?? 0) as int) + 1;
+        : existingInSide.docs
+        .map((d) => (d.data()['blockNumber'] ?? 0) as int)
+        .reduce((a, b) => a > b ? a : b) +
+        1;
 
     final blockRef = blocksRef.doc();
     final batch = _db.batch();
